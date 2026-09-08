@@ -1,0 +1,35 @@
+project: data_interaction_posttraining
+pair_name: forward_reverse
+seed: 42
+scales: [1000, 5000, 10000]
+
+data:
+  a_path: data/raw/forward.jsonl
+  b_path: data/raw/reverse.jsonl
+  output_dir: data/processed/forward_reverse
+  sampling: example_count  # token_budget is a TODO
+
+training:
+  bf16: true
+  tf32: true
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-5
+  num_train_epochs: 2
+  max_seq_length: 2048
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  lr_scheduler_type: cosine
+  gradient_checkpointing: true
+  save_strategy: epoch
+  save_total_limit: 2
+  logging_steps: 10
+  report_to: none
+  seed: 42
+  deepspeed: configs/deepspeed/zero2.json
+
+evaluation:
+  # Add any names available in your installed lm-eval version.
+  tasks: [gsm8k]
+  batch_size: auto
+

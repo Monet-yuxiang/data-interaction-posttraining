@@ -1,0 +1,6 @@
+model:
+  name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+  trust_remote_code: true
+  use_fast_tokenizer: true
+  # "sdpa" has no extra build step; use "flash_attention_2" when flash-attn is installed.
+  attn_implementation: sdpa

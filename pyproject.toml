@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-interaction-posttraining"
+version = "0.1.0"
+description = "Minimal experiment framework for scale-persistent data interactions in LLM post-training"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+train = [
+  "torch>=2.1",
+  "transformers>=4.43",
+  "datasets>=2.20",
+  "peft>=0.12",
+  "accelerate>=0.33",
+  "deepspeed>=0.14",
+  "sentencepiece>=0.2",
+]
+eval = ["lm-eval>=0.4.4"]
+analysis = ["matplotlib>=3.8"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

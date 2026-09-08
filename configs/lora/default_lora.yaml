@@ -1,0 +1,8 @@
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules: null  # auto-detect q/k/v/o and MLP projections
+  bias: none
+  task_type: CAUSAL_LM
+
