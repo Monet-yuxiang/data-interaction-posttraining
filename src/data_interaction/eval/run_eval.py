@@ -11,7 +11,7 @@ from typing import Any
 from data_interaction.utils.logging import configure_logging
 
 LOGGER = logging.getLogger(__name__)
-PREFERRED_METRICS = ("exact_match,strict-match", "exact_match", "acc_norm,none", "acc,none", "acc")
+PREFERRED_METRICS = ("exact_match,flexible-extract", "exact_match,strict-match", "exact_match", "acc_norm,none", "acc,none", "acc")
 
 
 def _primary_score(metrics: dict[str, Any]) -> float | None:
@@ -45,6 +45,9 @@ def evaluate(checkpoint: str, tasks: list[str], batch_size: str, limit: float | 
         tasks=tasks,
         batch_size=batch_size,
         limit=limit,
+        apply_chat_template=True,
+        fewshot_as_multiturn=False,
+        num_fewshot=0,
         log_samples=False,
     )
     scores: dict[str, float] = {}

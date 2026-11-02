@@ -18,3 +18,5 @@ def test_adapter_evaluation_includes_base_model(tmp_path: Path, monkeypatch) -> 
     assert evaluate(str(tmp_path), ["gsm8k"], "auto", 10) == {"gsm8k": 0.4}
     assert "pretrained=example/base" in captured["model_args"]
     assert f"peft={tmp_path}" in captured["model_args"]
+    assert captured["apply_chat_template"] is True
+    assert captured["num_fewshot"] == 0

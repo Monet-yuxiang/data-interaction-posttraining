@@ -21,7 +21,7 @@ train = [
   "deepspeed>=0.14",
   "sentencepiece>=0.2",
 ]
-eval = ["lm-eval[hf]>=0.4.4"]
+eval = ["lm-eval[hf]==0.4.13"]
 analysis = ["matplotlib>=3.8"]
 dev = ["pytest>=8.0"]
 
