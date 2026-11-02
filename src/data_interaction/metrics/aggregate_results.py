@@ -10,7 +10,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any, Iterable
 
-from data_interaction.metrics.interaction_metrics import compute_interaction_metrics, sign_is_persistent
+from data_interaction.metrics.interaction_metrics import compute_interaction_metrics, mixture_curvature, sign_is_persistent
 
 CORE_SETTINGS = ("baseline", "a_only", "b_only", "fixed_mix", "expanded_mix")
 
@@ -88,7 +88,14 @@ def aggregate(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list
                 continue
             gap = mixed - max(a_score, b_score)
             summary[f"{prefix}_mix_vs_best"] = gap
-            if baseline is None:
+            if mix_setting == "fixed_mix":
+                # The builder uses floor(N/2) examples from A, not always 50%.
+                a_weight = (scale // 2) / scale
+                curvature = mixture_curvature(a_score, b_score, mixed, a_weight)
+                summary["fixed_affine_deviation"] = curvature
+                summary["fixed_gamma"] = None
+                label = "fixed_budget_affine_deviation"
+            elif baseline is None:
                 summary[f"{prefix}_gamma"] = None
                 label = "baseline_missing"
             else:
@@ -129,6 +136,33 @@ def aggregate(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list
     return summaries, trends, breakdown
 
 
+def aggregate_by_seed_task(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cells: dict[tuple[str, str, int, int, str], dict[str, float]] = defaultdict(dict)
+    for record in records:
+        for task, value in record.get("eval_results", {}).items():
+            if not isinstance(value, (int, float)):
+                continue
+            key = (str(record.get("pair_name", "unknown")), str(record.get("model_name", "unknown")),
+                   int(record["scale"]), int(record.get("seed", 42)), task)
+            setting = record["setting"]
+            if setting in cells[key]:
+                raise ValueError(f"duplicate result for {key}, {setting}")
+            cells[key][setting] = float(value)
+    rows = []
+    for key, scores in sorted(cells.items()):
+        if not all(s in scores for s in ("a_only", "b_only", "fixed_mix", "expanded_mix")):
+            continue
+        a, b, fixed, expanded = (scores[s] for s in ("a_only", "b_only", "fixed_mix", "expanded_mix"))
+        row = dict(zip(("pair_name", "model_name", "scale", "seed", "task"), key))
+        row.update({"baseline": scores.get("baseline"), "a_only": a, "b_only": b,
+                    "fixed_mix": fixed, "expanded_mix": expanded,
+                    "fixed_gap_vs_best": fixed - max(a, b),
+                    "fixed_affine_deviation": mixture_curvature(a, b, fixed, (key[2] // 2) / key[2]),
+                    "expanded_contrast": expanded - a - b + scores["baseline"] if "baseline" in scores else None})
+        rows.append(row)
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results_dir", required=True)
@@ -139,13 +173,18 @@ def main() -> None:
     summary_path = Path(args.output_csv)
     trend_path = Path(args.scale_trend_csv) if args.scale_trend_csv else summary_path.with_name(summary_path.stem + "_scale_trend.csv")
     benchmark_path = Path(args.benchmark_csv) if args.benchmark_csv else summary_path.with_name(summary_path.stem + "_benchmark_breakdown.csv")
-    summaries, trends, breakdown = aggregate(_read_results(args.results_dir))
-    summary_fields = ["pair_name", "model_name", "scale", "baseline_avg", "forward_avg", "reverse_avg", "fixed_mix_avg", "expanded_mix_avg", "fixed_mix_vs_best", "expanded_mix_vs_best", "fixed_gamma", "expanded_gamma", "interaction_type"]
+    records = _read_results(args.results_dir)
+    summaries, trends, breakdown = aggregate(records)
+    seed_rows = aggregate_by_seed_task(records)
+    summary_fields = ["pair_name", "model_name", "scale", "baseline_avg", "forward_avg", "reverse_avg", "fixed_mix_avg", "expanded_mix_avg", "fixed_mix_vs_best", "expanded_mix_vs_best", "fixed_affine_deviation", "fixed_gamma", "expanded_gamma", "interaction_type"]
     trend_fields = ["pair_name", "model_name", "scale", "mix_setting", "gap_vs_best", "gamma", "interaction_type", "gap_sign_persistent", "gamma_sign_persistent"]
     dynamic_tasks = sorted({key for row in breakdown for key in row} - {"pair_name", "model_name", "scale", "setting", "average"})
     _write_csv(summary_path, summaries, summary_fields)
     _write_csv(trend_path, trends, trend_fields)
     _write_csv(benchmark_path, breakdown, ["pair_name", "model_name", "scale", "setting", *dynamic_tasks, "average"])
+    seed_path = summary_path.with_name(summary_path.stem + "_by_seed_task.csv")
+    seed_fields = ["pair_name", "model_name", "scale", "seed", "task", "baseline", "a_only", "b_only", "fixed_mix", "expanded_mix", "fixed_gap_vs_best", "fixed_affine_deviation", "expanded_contrast"]
+    _write_csv(seed_path, seed_rows, seed_fields)
     print(f"Wrote {summary_path}, {trend_path}, and {benchmark_path}")
 
 

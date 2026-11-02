@@ -1,0 +1,21 @@
+project: data_interaction_posttraining
+pair_name: public_forward_reverse_exploratory
+seed: 42
+scales: [500, 900]
+training:
+  bf16: true
+  tf32: true
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-5
+  num_train_epochs: 2
+  max_seq_length: 2048
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  gradient_checkpointing: true
+  save_strategy: epoch
+  save_total_limit: 2
+  logging_steps: 10
+  report_to: none
+  seed: 42
+  deepspeed: null

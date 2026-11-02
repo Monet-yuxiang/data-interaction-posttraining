@@ -40,7 +40,7 @@ def main() -> None:
         points.sort()
         axis.plot([x for x, _ in points], [y for _, y in points], marker="o", label=f"{model} / {mix}")
     axis.axhline(0, color="black", linewidth=0.8)
-    axis.set(xlabel="Training scale (examples per group)", ylabel="Mixed vs best single", title="Scale-persistent interaction gap")
+    axis.set(xlabel="Training scale (examples per group)", ylabel="Mixed vs best single", title="Mixture performance gap")
     axis.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(out_dir / "scale_trends.png", dpi=180)

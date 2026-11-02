@@ -1,6 +1,6 @@
 import math
 
-from data_interaction.metrics.interaction_metrics import compute_interaction_metrics, sign_is_persistent
+from data_interaction.metrics.interaction_metrics import compute_interaction_metrics, mixture_curvature, sign_is_persistent
 
 
 def test_mutual_undermining_metrics() -> None:
@@ -23,3 +23,8 @@ def test_sign_persistence() -> None:
     assert not sign_is_persistent([-0.1, 0.2])
     assert not sign_is_persistent([0.0, 0.2])
     assert not sign_is_persistent([-0.1])
+
+
+def test_below_best_does_not_imply_nonadditivity() -> None:
+    assert math.isclose(mixture_curvature(0.7, 0.6, 0.65), 0.0, abs_tol=1e-12)
+    assert math.isclose(mixture_curvature(0.7, 0.6, 0.62), -0.03, abs_tol=1e-12)

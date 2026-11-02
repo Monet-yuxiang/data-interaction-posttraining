@@ -31,9 +31,17 @@ def evaluate(checkpoint: str, tasks: list[str], batch_size: str, limit: float | 
     except ImportError as exc:
         raise SystemExit("lm-eval is missing. Install with: pip install -e '.[eval]'") from exc
 
+    adapter_config = Path(checkpoint) / "adapter_config.json"
+    if adapter_config.exists():
+        base_model = json.loads(adapter_config.read_text(encoding="utf-8")).get("base_model_name_or_path")
+        if not base_model:
+            raise ValueError(f"adapter has no base_model_name_or_path: {adapter_config}")
+        model_args = f"pretrained={base_model},peft={checkpoint},trust_remote_code=True"
+    else:
+        model_args = f"pretrained={checkpoint},trust_remote_code=True"
     raw = evaluator.simple_evaluate(
         model="hf",
-        model_args=f"pretrained={checkpoint},trust_remote_code=True",
+        model_args=model_args,
         tasks=tasks,
         batch_size=batch_size,
         limit=limit,
@@ -63,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--setting",
         required=True,
-        choices=("baseline", "a_only", "b_only", "fixed_mix", "expanded_mix"),
+        help="Setting name, e.g. a_only, fixed_mix, or factorial 000/111",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train_data_path", default="")

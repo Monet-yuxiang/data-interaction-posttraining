@@ -143,6 +143,7 @@ def run_training(config: dict[str, Any], train_data: str, output_dir: str, resum
         gradient_accumulation_steps=int(train_cfg.get("gradient_accumulation_steps", 8)),
         learning_rate=float(train_cfg.get("learning_rate", 2e-5)),
         num_train_epochs=float(train_cfg.get("num_train_epochs", 2)),
+        max_steps=int(train_cfg.get("max_steps", -1)),
         warmup_ratio=float(train_cfg.get("warmup_ratio", 0.03)),
         weight_decay=float(train_cfg.get("weight_decay", 0.0)),
         lr_scheduler_type=str(train_cfg.get("lr_scheduler_type", "cosine")),
@@ -171,10 +172,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--model_config")
+    parser.add_argument("--model_name", help="Override model.name_or_path")
     parser.add_argument("--lora_config")
     parser.add_argument("--train_data", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--deepspeed", help="Override training.deepspeed")
+    parser.add_argument("--seed", type=int, help="Override training and data shuffle seed")
+    parser.add_argument("--max_steps", type=int, help="Override optimizer steps; use for smoke tests")
     parser.add_argument("--resume_from_checkpoint")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
@@ -189,8 +193,14 @@ def main() -> None:
     if args.lora_config:
         parts.append(load_yaml(args.lora_config))
     config = deep_merge(*parts)
+    if args.model_name:
+        config.setdefault("model", {})["name_or_path"] = args.model_name
     if args.deepspeed:
         config.setdefault("training", {})["deepspeed"] = args.deepspeed
+    if args.seed is not None:
+        config.setdefault("training", {})["seed"] = args.seed
+    if args.max_steps is not None:
+        config.setdefault("training", {})["max_steps"] = args.max_steps
     config["train_data"] = str(Path(args.train_data))
     if int(os.environ.get("RANK", "0")) == 0:
         save_run_metadata(args.output_dir, config)

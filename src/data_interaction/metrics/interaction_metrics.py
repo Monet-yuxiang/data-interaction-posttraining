@@ -21,7 +21,10 @@ class InteractionMetrics:
 
 
 def compute_interaction_metrics(baseline: float, a_only: float, b_only: float, mixed: float) -> InteractionMetrics:
-    """Compute the preregistered metrics from S0, SA, SB, and SAB."""
+    """Legacy expanded-exposure contrast; not a causal mechanism estimate.
+
+    Do not apply this contrast to fixed-total mixtures, which change dose.
+    """
     gap = mixed - max(a_only, b_only)
     gamma = mixed - a_only - b_only + baseline
     strong = a_only > baseline and b_only > baseline and mixed < min(a_only, b_only)
@@ -40,6 +43,13 @@ def compute_interaction_metrics(baseline: float, a_only: float, b_only: float, m
     else:
         label = "additive"
     return InteractionMetrics(gap, gamma, mutual, strong, rescue, label)
+
+
+def mixture_curvature(a_only: float, b_only: float, mixed: float, a_weight: float = 0.5) -> float:
+    """Deviation from the chosen affine single-source reference (higher-is-better)."""
+    if not 0 <= a_weight <= 1:
+        raise ValueError("a_weight must be between 0 and 1")
+    return mixed - (a_weight * a_only + (1 - a_weight) * b_only)
 
 
 def sign_is_persistent(values: Iterable[float]) -> bool:
