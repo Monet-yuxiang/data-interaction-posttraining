@@ -37,7 +37,7 @@ results/windowed_chunks_gen_1024/seed_42/scale_500/fixed_mix/chunk_0000_0100.jso
 
 ### 实验问题与 15 组
 
-来源 A、B、C、D 分别是 Tulu 3 混合集合中的 FLAN、Persona Math、Evol CodeAlpaca、WildChat；参考来源 R 是 OpenAssistant；背景为另三个公开来源。实际 source 名称和固定的上游版本记录在数据 manifest。仅使用单轮 user/assistant 对话；背景三个来源按块数近似均分，并不是 Tulu 原始配比。
+来源 A、B、C、D 分别是 Tulu 3 混合集合中的 FLAN、Persona Math、Evol CodeAlpaca、WildChat；参考来源 R 是 Persona IF；背景为 SciRIFF 和 Aya。实际 source 名称和固定的上游版本记录在数据 manifest。仅使用单轮 user/assistant 对话；背景两个来源按块数均分，并不是 Tulu 原始配比。
 
 共同背景占 80% 的输入 token，两个可替换槽各占 10%。两份参考数据 R1、R2 使用不同样本，避免对照重复训练同一批数据。固定相同 tokenizer、输入 token 数、优化步数和其他设置：
 

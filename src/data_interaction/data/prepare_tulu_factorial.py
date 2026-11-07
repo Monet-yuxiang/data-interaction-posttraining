@@ -20,10 +20,9 @@ SOURCES = {
     "b": "ai2-adapt-dev/personahub_math_v5_regen_149960",
     "c": "ai2-adapt-dev/evol_codealpaca_heval_decontaminated",
     "d": "ai2-adapt-dev/tulu_v3.9_wildchat_100k",
-    "r": "ai2-adapt-dev/oasst1_converted",
+    "r": "ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980",
 }
 BACKGROUND = (
-    "ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980",
     "ai2-adapt-dev/tulu_v3.9_sciriff_10k",
     "ai2-adapt-dev/tulu_v3.9_aya_100k",
 )

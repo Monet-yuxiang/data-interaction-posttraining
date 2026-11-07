@@ -32,6 +32,8 @@ def read(path):
 
 
 def test_factorial_slots_match_and_reference_disjoint(tmp_path):
+    assert SOURCES["r"] not in BACKGROUND
+    assert len(set(SOURCES.values()) | set(BACKGROUND)) == len(SOURCES) + len(BACKGROUND)
     manifest = prepare(source_rows(), FakeTokenizer(), tmp_path / "out", 80, 8, 42, "fake")
     assert len(SETTINGS) == 15
     assert all(x["input_tokens"] == 640 for x in manifest["files"].values())
