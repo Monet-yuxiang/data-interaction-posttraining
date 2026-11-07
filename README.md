@@ -6,6 +6,6 @@ An experimental framework for measuring how SFT data sources interact in a share
 
 The first main experiment uses four preselected sources from the published [Tulu 3 SFT mixture](https://huggingface.co/datasets/allenai/tulu-3-sft-mixture), a common background, and two disjoint reference slots. Fifteen settings provide six pairwise replacement contrasts. Sources, model, background, budget, and evaluation determine the scope of the result; six pairs are not evidence of universal prevalence.
 
-Implementation and tests have been checked locally on CPU. **The new Tulu download, packed training, and multi-task evaluation have not yet been verified end to end on the collaborator's GPU server.** Run the first real reference job and review its output before scheduling the rest. See the runbook for assumptions, costs, and resume instructions.
+Implementation and tests have been checked locally on CPU; a small real-data stream produced all 15 settings and verified their packed budgets. **The full 4,800-block preparation, GPU training, and multi-task evaluation have not yet been verified end to end on the collaborator's server.** Run the first real reference job and review its output before scheduling the rest. See the runbook for assumptions, costs, and resume instructions.
 
 Run tests with `pytest -q`.
