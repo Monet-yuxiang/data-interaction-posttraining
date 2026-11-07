@@ -1,0 +1,21 @@
+project: data_interaction_posttraining
+pair_name: tulu_factorial
+training:
+  pretokenized: true
+  bf16: true
+  tf32: true
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-5
+  num_train_epochs: 1
+  max_seq_length: 2048
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  gradient_checkpointing: true
+  save_strategy: steps
+  save_steps: 20
+  save_total_limit: 2
+  logging_steps: 10
+  report_to: none
+  seed: 42
+  deepspeed: null

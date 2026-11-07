@@ -47,3 +47,32 @@ def test_chunk_uses_exact_ids_and_chat_template(tmp_path, monkeypatch):
     assert calls[0]["samples"] == {"gsm8k": [3, 4]}
     assert calls[0]["apply_chat_template"] is True
     assert calls[0]["num_fewshot"] == 0
+
+
+def test_explicit_generation_limit_is_applied_and_cannot_reuse_legacy_chunk(tmp_path, monkeypatch):
+    calls = []
+
+    def evaluate(**kwargs):
+        calls.append(kwargs)
+        return {"samples": {"gsm8k": [{"doc_id": i, "filter": "flexible-extract", "exact_match": 1.0}
+                                     for i in kwargs["samples"]["gsm8k"]]}}
+
+    monkeypatch.setitem(sys.modules, "lm_eval", types.SimpleNamespace(evaluator=types.SimpleNamespace(simple_evaluate=evaluate)))
+    monkeypatch.setattr("data_interaction.eval.gsm8k_chunks.version", lambda _: "0.4.13")
+    args = types.SimpleNamespace(start=0, end=2, checkpoint="base", setting="baseline", model_name="base",
+                                 pair_name="p", seed=42, scale=500, out_dir=tmp_path, device="cpu",
+                                 max_gen_toks=None)
+    run_chunk(args)
+    args.max_gen_toks = 1024
+    with pytest.raises(ValueError, match="different settings"):
+        run_chunk(args)
+    args.out_dir = tmp_path / "new"
+    run_chunk(args)
+    assert calls[-1]["gen_kwargs"] == {"max_gen_toks": 1024}
+    payload = json.loads((args.out_dir / "chunk_0000_0002.json").read_text(encoding="utf-8"))
+    assert payload["identity"]["max_gen_toks"] == 1024
+    run_chunk(args)
+    assert len(calls) == 2
+    args.max_gen_toks = 0
+    with pytest.raises(ValueError, match="positive"):
+        run_chunk(args)

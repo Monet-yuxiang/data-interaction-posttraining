@@ -86,6 +86,30 @@ def _format_example(example: dict[str, Any], tokenizer: Any) -> str:
     return f"### Instruction:\n{prompt}\n\n### Response:\n{example['output']}{eos}"
 
 
+def validate_packed_records(records: Any, max_length: int, accumulation: int, batch_size: int) -> dict[str, int]:
+    """Validate fixed-length unpadded blocks for equal input-token and step budgets."""
+    if not len(records) or len(records) % (accumulation * batch_size):
+        raise ValueError("packed block count must be positive and divisible by batch size * gradient accumulation")
+    targets = 0
+    for row in records:
+        ids, mask, labels = row["input_ids"], row["attention_mask"], row["labels"]
+        if len(ids) != max_length or len(mask) != max_length or len(labels) != max_length:
+            raise ValueError("all packed blocks must have exactly max_seq_length tokens")
+        if any(value != 1 for value in mask):
+            raise ValueError("packed blocks must not contain attention padding")
+        if any(label != -100 and label != token for token, label in zip(ids, labels)):
+            raise ValueError("labels must match input_ids or be masked with -100")
+        # Causal LM loss shifts labels, so position 0 is never supervised.
+        block_targets = sum(value != -100 for value in labels[1:])
+        if not block_targets:
+            raise ValueError("packed block has no supervised tokens after causal shift")
+        targets += block_targets
+    if not targets:
+        raise ValueError("packed dataset has no supervised tokens")
+    return {"blocks": len(records), "input_tokens": len(records) * max_length,
+            "supervised_tokens_after_shift": targets, "optimizer_steps": len(records) // (accumulation * batch_size)}
+
+
 def run_training(config: dict[str, Any], train_data: str, output_dir: str, resume: str | None = None) -> None:
     (
         torch,
@@ -151,12 +175,22 @@ def run_training(config: dict[str, Any], train_data: str, output_dir: str, resum
             windows.extend(response_windows(tokenizer, {key: batch[key][index] for key in batch}, max_length))
         return {key: [window[key] for window in windows] for key in ("input_ids", "attention_mask", "labels")}
 
-    tokenized = raw_dataset.map(
-        tokenize,
-        batched=True,
-        remove_columns=raw_dataset.column_names,
-        desc="Tokenizing SFT data",
-    )
+    if train_cfg.get("pretokenized", False):
+        if int(os.environ.get("WORLD_SIZE", "1")) != 1:
+            raise ValueError("packed fixed-budget runs currently support one GPU per independent job")
+        if float(train_cfg.get("num_train_epochs", 2)) != 1 or int(train_cfg.get("max_steps", -1)) > 0:
+            raise ValueError("packed fixed-budget runs require one epoch and no max_steps override")
+        counts = validate_packed_records(raw_dataset, max_length,
+            int(train_cfg.get("gradient_accumulation_steps", 8)), int(train_cfg.get("per_device_train_batch_size", 1)))
+        LOGGER.info("Packed input budget: %s", counts)
+        tokenized = raw_dataset.select_columns(["input_ids", "attention_mask", "labels"])
+    else:
+        tokenized = raw_dataset.map(
+            tokenize,
+            batched=True,
+            remove_columns=raw_dataset.column_names,
+            desc="Tokenizing SFT data",
+        )
 
     arguments = TrainingArguments(
         output_dir=output_dir,

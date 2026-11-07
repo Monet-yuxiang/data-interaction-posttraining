@@ -34,6 +34,9 @@ def write_atomic(path: Path, payload: dict) -> None:
 def run_chunk(args) -> None:
     if args.start < 0 or args.end <= args.start or args.end > TOTAL:
         raise ValueError(f"Require 0 <= start < end <= {TOTAL}")
+    max_gen_toks = getattr(args, "max_gen_toks", None)
+    if max_gen_toks is not None and max_gen_toks <= 0:
+        raise ValueError("max_gen_toks must be positive")
     checkpoint = Path(args.checkpoint)
     if args.setting != "baseline" and not (checkpoint / "TRAINING_COMPLETE.json").is_file():
         raise ValueError("Adapter training is not complete; refusing evaluation")
@@ -42,6 +45,10 @@ def run_chunk(args) -> None:
                 "seed": args.seed, "scale": args.scale, "task": "gsm8k", "num_fewshot": 0,
                 "chat_template": True, "fewshot_as_multiturn": False, "metric": "exact_match,flexible-extract",
                 "lm_eval_version": version("lm-eval")}
+    # An omitted limit preserves the legacy identity and lm-eval default (256
+    # in 0.4.13); explicit limits must never reuse an old chunk silently.
+    if max_gen_toks is not None:
+        identity["max_gen_toks"] = max_gen_toks
     output = args.out_dir / f"chunk_{args.start:04d}_{args.end:04d}.json"
     if output.exists():
         current = json.loads(output.read_text(encoding="utf-8"))
@@ -56,9 +63,10 @@ def run_chunk(args) -> None:
         base = json.loads(adapter.read_text(encoding="utf-8"))["base_model_name_or_path"]
         model_args = f"pretrained={base},peft={args.checkpoint},trust_remote_code=True"
     indices = list(range(args.start, args.end))
+    generation = {"gen_kwargs": {"max_gen_toks": max_gen_toks}} if max_gen_toks is not None else {}
     raw = evaluator.simple_evaluate(model="hf", model_args=model_args, tasks=["gsm8k"], batch_size="1",
              samples={"gsm8k": indices}, apply_chat_template=True, fewshot_as_multiturn=False,
-             num_fewshot=0, log_samples=True, bootstrap_iters=0, device=args.device)
+             num_fewshot=0, log_samples=True, bootstrap_iters=0, device=args.device, **generation)
     samples = raw["samples"]["gsm8k"]
     filtered = [s for s in samples if s.get("filter") == "flexible-extract"]
     by_id = {int(s["doc_id"]): s for s in filtered}
@@ -113,6 +121,7 @@ def main() -> None:
     run.add_argument("--start", type=int, required=True)
     run.add_argument("--end", type=int, required=True)
     run.add_argument("--device", help="Optional lm-eval device override, e.g. cpu")
+    run.add_argument("--max-gen-toks", type=int, help="Maximum generated tokens; omit for legacy lm-eval default")
     merge = sub.add_parser("merge")
     merge.add_argument("--chunks", type=Path, required=True)
     merge.add_argument("--output-json", type=Path, required=True)

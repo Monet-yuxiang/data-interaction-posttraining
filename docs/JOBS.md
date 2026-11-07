@@ -1,86 +1,137 @@
-# Resumable two-source experiment
+# 实验操作手册
 
-This workflow focuses on the A/B main line. A two-hour allocation is **not** assumed; train one setting per job, checkpoint every 20 optimizer steps, and evaluate GSM8K in batches of 100. Actual duration depends on GPU, data lengths, network and queue. No GPU or lm-eval shard has yet been validated on the collaborator's server: first run the short checks below and report timings/peak memory. Use the same model, tokenizer, environment and filesystem for all jobs and resumptions.
+本手册是同学执行实验的唯一入口。先做第 1 部分，使用已训练的模型重评；第 2 部分是新的真实数据主实验。所有命令在 Linux 服务器、包含 `pyproject.toml` 的项目目录下运行。训练和评测需要已申请到 GPU，并使用与之前相同的 CUDA/Python 环境。
 
-## What changed
+## 1. 已有模型：延长回答后重新评测
 
-1. Evaluation uses the Qwen chat template, zero-shot GSM8K and `exact_match,flexible-extract` on every setting. Flexible extraction is a proxy and individual predictions should be inspected. Earlier five-shot/no-chat/strict smoke scores are a different protocol and **must not be combined**.
-2. SFT splits each assistant response into windows of at most 2048 tokens. Every assistant target token is used exactly once, with the question and up to 512 prior response tokens repeated as masked context. The prompt and repeated context are not included in loss. This avoids silent target loss but is **not full-context training**: long-range reasoning history is missing, and long examples make more windows and therefore receive more optimizer updates. This is an exploratory training protocol, not a token-budget-matched design. Questions exceeding the window fail clearly.
-3. `outputs/windowed/` and `results/windowed*` are new locations; previous smoke artifacts remain untouched. A run signature checks configuration and source JSONL hash on resume. Training saves optimizer, scheduler and RNG with Hugging Face checkpoints; interruption between checkpoints can lose up to 20 steps. Complete output has `TRAINING_COMPLETE.json`.
+旧评测没有显式设置生成上限，`lm-eval 0.4.13` 默认最多生成 256 token，许多微调后的回答可能未写完。旧数据不应删除，也不能与新结果合并。此次先评测基座和 fixed mix 的相同前 100 道 GSM8K 题，不重新训练。
 
-In one local check, the first 10 forward examples expanded into 70 windows and the first 10 reverse examples into 36 windows. They are not random samples. Expect considerably more training steps than in the earlier truncating smoke test; measure the new workflow on the server.
-
-## First setup
-
-Update your existing clone with `git pull --ff-only` after checking for local changes. Install the updated evaluation version in the existing environment: `pip install -e '.[data,train,eval,analysis,dev]'` (uses `lm-eval==0.4.13`). Existing `data/raw/forward.jsonl` and `reverse.jsonl` can be reused. Otherwise see [COLLABORATOR.md](COLLABORATOR.md) for source download. The GPU machine needs its usual CUDA-enabled PyTorch; keep `deepspeed: null` for one GPU.
-
-Prepare source-example mixtures; 20 is for smoke test and 500 is the first real exploratory scale:
+在每个独立 GPU 任务内，先进入项目目录、激活原环境，然后从训练记录取得原基座模型：
 
 ```bash
-python scripts/prepare_forward_reverse_data.py \
-  --a_path data/raw/forward.jsonl --b_path data/raw/reverse.jsonl \
-  --out_dir data/processed/public_pilot/seed_42 --scales 20 500 --seed 42
-export MODEL=models/Qwen2.5-1.5B-Instruct  # use your actual local path or HF ID
+export MODEL="$(python -c 'import json; print(json.load(open("outputs/windowed/seed_42/scale_500/a_only/run_signature.json", encoding="utf-8"))["config"]["model"]["name_or_path"])')"
+export CHUNK_SIZE=100
+export MAX_GEN_TOKS=1024
+echo "MODEL=$MODEL; CHUNK_SIZE=$CHUNK_SIZE; MAX_GEN_TOKS=$MAX_GEN_TOKS"
 ```
 
-Retain the same `MODEL` value across training and evaluation; do not replace weights or data in place. Sampling seeds 43 and 44 require separate preparation with matching `--seed` and `seed_43`/`seed_44` output paths.
-
-## Verify the revised pipeline
-
-Run a small training job and a baseline evaluation chunk. The evaluation command below uses 5 questions and is a format check only:
-
-```bash
-bash scripts/run_training_job.sh a_only 20 42
-python -m data_interaction.eval.gsm8k_chunks run \
-  --checkpoint "$MODEL" --model-name "$MODEL" --setting baseline \
-  --scale 20 --seed 42 --start 0 --end 5 --out-dir results/windowed-smoke
-```
-
-Record wall time and peak GPU memory (`nvidia-smi` during training); verify there is no out-of-memory or chat-template warning. Then test one adapter chunk:
-
-```bash
-python -m data_interaction.eval.gsm8k_chunks run \
-  --checkpoint outputs/windowed/seed_42/scale_20/a_only --model-name "$MODEL" \
-  --setting a_only --scale 20 --seed 42 --start 0 --end 5 --out-dir results/windowed-smoke-adapter
-```
-
-The smoke output is not suitable for scientific conclusions. Ask the project owner before scaling up if these checks fail or take unexpectedly long.
-
-## Train a single setting
-
-Submit one command per allocation; repeat for `a_only`, `b_only`, `fixed_mix`, and `expanded_mix`:
-
-```bash
-bash scripts/run_training_job.sh a_only 500 42
-```
-
-If interrupted, re-run the **identical command**; it resumes the latest saved checkpoint or restarts if no checkpoint was saved. A completed run is skipped. Do not run two jobs for the same setting/seed simultaneously. If your scheduler has a wall limit, optionally set `TIME_LIMIT_SECONDS=4200` (soft limit, starts after data preprocessing); the trainer saves and stops at the next completed step. Leave extra time for model loading, tokenization and checkpoint saving. It cannot guarantee a hard scheduler deadline or protect against a kill during the first step/save.
-
-## Evaluate in independent batches
-
-For each of `baseline`, `a_only`, `b_only`, `fixed_mix`, `expanded_mix`, run a separate batch job with start indices `0, 100, 200, ..., 1300`. For example:
+确认 `MODEL` 与训练时的基座路径一致，`outputs/windowed/seed_42/scale_500/fixed_mix/TRAINING_COMPLETE.json` 存在。以下两条命令各为一个 GPU 任务：
 
 ```bash
 bash scripts/run_gsm8k_chunk.sh baseline 0 500 42
-bash scripts/run_gsm8k_chunk.sh a_only 0 500 42
-bash scripts/run_gsm8k_chunk.sh a_only 100 500 42
+bash scripts/run_gsm8k_chunk.sh fixed_mix 0 500 42
 ```
 
-The last batch, start 1300, contains 19 examples. Each setting needs 14 batches for the full 1,319-question test set. Once a batch completes, running the exact same command skips it; if interrupted, only the current batch needs to be rerun. Different batches may be submitted separately. `CHUNK_SIZE` changes batch size but must remain consistent for all starts of one evaluation; avoid overlapping jobs. With 100 examples and the previous 10-example timing, roughly 20 minutes is an initial guess only. Scheduler/model loading and answer length may change it; measure on the server.
+将以下文件发回项目负责人：
 
-After **all** 14 batches of a setting finish, merge it:
+```text
+results/windowed_chunks_gen_1024/seed_42/scale_500/baseline/chunk_0000_0100.json
+results/windowed_chunks_gen_1024/seed_42/scale_500/fixed_mix/chunk_0000_0100.json
+```
+
+这两个文件已记录生成上限，保存到新目录。重跑同一任务会跳过已完成的相同结果；中断后当前 100 题需重跑。1024 是新的生成上限，不能保证所有回答自然结束。请同时保留运行日志和实际耗时。如果评测失败，把日志发回；不要重训或覆盖旧数据。`merge` 仅用于完整 1319 题，此处不需要。
+
+## 2. 主实验：真实多来源 SFT 数据
+
+**状态：以下代码已完成本地 CPU 测试，但数据集下载、完整数据准备、目标 GPU 训练和多任务评测尚未在同学的服务器上端到端验证。先执行共同参照的一个正式任务并汇报，不要一次性提交全部任务。** 该任务正常完成后可作为正式实验的一部分。
+
+### 实验问题与 15 组
+
+来源 A、B、C、D 分别是 Tulu 3 混合集合中的 FLAN、Persona Math、Evol CodeAlpaca、WildChat；参考来源 R 是 OpenAssistant；背景为另三个公开来源。实际 source 名称和固定的上游版本记录在数据 manifest。仅使用单轮 user/assistant 对话；背景三个来源按块数近似均分，并不是 Tulu 原始配比。
+
+共同背景占 80% 的输入 token，两个可替换槽各占 10%。两份参考数据 R1、R2 使用不同样本，避免对照重复训练同一批数据。固定相同 tokenizer、输入 token 数、优化步数和其他设置：
+
+| 组名 | 第一个槽 | 第二个槽 |
+|---|---|---|
+| baseline | R1 | R2 |
+| a1、b1、c1、d1 | A/B/C/D | R2 |
+| a2、b2、c2、d2 | R1 | A/B/C/D |
+| ab、ac、ad、bc、bd、cd | 字母序前一个来源 | 字母序后一个来源 |
+
+例如 AB 的差分为 `score(ab) - score(a1) - score(b2) + score(baseline)`；它反映相对于此背景、参考数据、槽位、预算和评测任务的非加性效应。15 组比早期的 11 组建议多 4 组，是为了使用不重复的参考数据并正确匹配两槽对照。六对不代表所有真实数据对。不要只根据一组结果称为普遍规律或推断机制。
+
+### 环境和数据准备
+
+使用与服务器 CUDA 驱动匹配的 PyTorch，并安装本仓库：
 
 ```bash
-python -m data_interaction.eval.gsm8k_chunks merge \
-  --chunks results/windowed_chunks/seed_42/scale_500/a_only \
-  --output-json results/windowed/seed_42/scale_500/a_only.json
+pip install -e '.[data,train,eval,analysis,dev]'
 ```
 
-Repeat for the other settings, including `baseline`, changing both paths. Merge checks all IDs 0–1318 exactly once and rejects mixed run identities. Per-sample predictions remain in chunk files for inspection. After all five merges:
+保持同一 `MODEL` 路径贯穿数据准备、训练和评测。可沿用此前实际训练的 Qwen2.5-1.5B-Instruct 路径，例如：
 
 ```bash
-python -m data_interaction.metrics.aggregate_results --results_dir results/windowed \
-  --output_csv analysis/windowed_summary.csv
+export MODEL="$(python -c 'import json; print(json.load(open("outputs/windowed/seed_42/scale_500/a_only/run_signature.json", encoding="utf-8"))["config"]["model"]["name_or_path"])')"
+export DATA_DIR=data/processed/tulu_factorial/seed_42
+export OUT_DIR=outputs/tulu_factorial/seed_42
 ```
 
-Do not mix old and new results, different model/tokenizer versions, or different evaluation protocols. Keep generated manifests, signatures and logs. For this pilot, benchmark overlap and incorrect synthetic answers have not been fully audited. Fixed example counts do not imply fixed token or compute budgets. The three-source factorial, matched-token controls, sequential order and mechanistic analysis remain future work; do not start a large matrix before reviewing the first seed.
+数据准备需要访问 Hugging Face 并下载公开数据。`4800` 个块，每块 2048 输入 token，即每组 9,830,400 输入 token；是第一档建议预算，不是预测的耗时。准备会生成 15 份文件，占用多份磁盘空间，请预留空间：
+
+```bash
+python -m data_interaction.data.prepare_tulu_factorial \
+  --model "$MODEL" --blocks 4800 --seed 42 --out-dir "$DATA_DIR"
+```
+
+完成后保留 `$DATA_DIR/manifest.json`。如输出目录非空，准备程序会拒绝覆盖；若数据源不足、下载失败或报错，请把日志发回。准备使用流式缓冲区打乱，不是对完整数据集的完全均匀抽样；上游各来源许可证可能不同。
+
+数据以 2048 token 打包，块内不同样本可以互相注意；长样本可跨块。提示与回答边界处若合并为一个 token，则将该 token 掩码以避免训练提示内容。所有组的输入 token 与优化步数相同，但各组实际用于 loss 的监督 token 可能不同，并记录在 manifest。因此不应称为完全相同的监督 token 或 GPU 时间。各来源与评测题目的重合尚未完整核查。
+
+### 训练：每次一个 GPU，支持恢复
+
+首先运行共同参照，记录耗时和显存：
+
+```bash
+bash scripts/run_tulu_training_job.sh baseline 42
+```
+
+确保 `MODEL`、`DATA_DIR`、`OUT_DIR` 在每个作业中都设置为同一值。可用 `TIME_LIMIT_SECONDS=4200` 设置软时间上限，但要为加载和保存留出额外时间；如任务中断，在相同环境、同一文件系统及相同参数下重新运行同一命令。已经完成的任务会跳过；不要同时运行同一设置的两个任务。
+
+第一组确认正常后，其他设置各提交一次，最多并行使用服务器实际获准的 GPU 数，单个任务只分配 1 张卡：
+
+```text
+a1 b1 c1 d1 a2 b2 c2 d2 ab ac ad bc bd cd
+```
+
+例如单独提交 `bash scripts/run_tulu_training_job.sh ab 42`。输出是 `$OUT_DIR/ab/`，完成后包含 `TRAINING_COMPLETE.json`。具体耗时由首个任务实测；不能把旧 pilot 耗时直接用于估算。
+
+### 评测与汇总
+
+正式比较时，对所有设置使用相同题目、模型版本、评测设置及生成上限。下面是共同参照在 GSM8K 的示例；其他设置替换 `SETTING`，确保基座路径 `MODEL` 不变，每个任务输出到对应的唯一文件：
+
+```bash
+export SETTING=baseline
+mkdir -p results/tulu_factorial/gsm8k/seed_42
+python -m data_interaction.eval.run_eval \
+  --checkpoint "$OUT_DIR/$SETTING" --model_name "$MODEL" \
+  --tasks gsm8k --metric 'exact_match,flexible-extract' --max_gen_toks 1024 \
+  --pair_name tulu_factorial --scale 4800 --seed 42 --setting "$SETTING" \
+  --output_json "results/tulu_factorial/gsm8k/seed_42/$SETTING.json"
+```
+
+评测脚本保存完整指标、逐题输出、生成长度和协议；存在同名结果时拒绝覆盖。它目前**不能分批恢复**，中断后该任务需重跑。1024 token 的设定应一致，并检查回答是否到达上限。
+
+为覆盖指令遵循能力，建议额外评测 IFEval。其任务配置和指标键已核对官方 `lm-eval 0.4.13`，但尚未在目标服务器实际运行。先安装任务依赖并确保能下载或缓存 `google/IFEval` 及 NLTK `punkt_tab`：
+
+```bash
+pip install 'lm-eval[ifeval]==0.4.13'
+export SETTING=baseline
+mkdir -p results/tulu_factorial/ifeval/seed_42
+python -m data_interaction.eval.run_eval \
+  --checkpoint "$OUT_DIR/$SETTING" --model_name "$MODEL" \
+  --tasks ifeval --metric 'prompt_level_strict_acc,none' --max_gen_toks 1280 --batch_size 1 \
+  --pair_name tulu_factorial --scale 4800 --seed 42 --setting "$SETTING" \
+  --output_json "results/tulu_factorial/ifeval/seed_42/$SETTING.json"
+```
+
+如首组通过，再逐组使用相同设置；各任务分别汇总。数学和指令遵循也不能代表所有能力，代码能力的安全评测尚未集成。
+
+15 组同一任务评测完成后：
+
+```bash
+python -m data_interaction.metrics.tulu_pairs \
+  --results-dir results/tulu_factorial/gsm8k/seed_42 \
+  --output-csv results/tulu_factorial/gsm8k/seed_42/pair_contrasts.csv
+```
+
+脚本检查各组的评测协议与题目是否一致。将 manifest、所有评测 JSON、汇总 CSV 和训练日志交给项目负责人；不要仅依据一次种子和少量来源宣布普遍性。更换模型或 token 预算时需要分别准备新目录、重跑 15 组，并保持同档内部协议一致。不同预算同时改变训练计算量，不能单独解释为数据量效应。
